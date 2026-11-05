@@ -1,0 +1,9 @@
+/*
+  NOTE:
+  project sebelumnya tidak memiliki public/style.css, tetapi beberapa tab/tooling/IDE
+  bisa mengharapkan file ini ada.
+
+  Saat ini style utama sudah inline di public/index.html.
+  File ini sengaja dibuat kosong + komentar agar tidak error di runtime.
+*/
+

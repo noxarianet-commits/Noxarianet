@@ -1,0 +1,47 @@
+# Environment variables & secrets
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+pg orkut/node_modules/
+
+# Database & local data
+*.sqlite
+data.sqlite
+users.json
+topup_requests.json
+runtime_counters.json
+ppob_visibility.json
+backup_json/
+
+# Cache & large binaries
+ppob_cache.json
+sekalipay_cache.json
+ind.traineddata
+
+# Scratch & temp files
+scratch/
+*.log
+.DS_Store
+
+# Miscellaneous
+*.class
+*.pyc
+*.swp
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+
+# IDE
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Uploads
+uploads/
