@@ -171,148 +171,6 @@ app.use(express.urlencoded({ extended: true }));
 const mobileApi = require('./mobileApi');
 app.use('/api/mobile', mobileApi);
 
-// Dedicated Polling Status Endpoint (Works for Mobile & Web)
-app.get('/api/payments/status/:orderId', requireAuth, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const username = req.user.username;
-    const user = await db.getUser(username);
-    const order = (user?.history || []).find(h => String(h.id) === String(orderId) || String(h.orderId) === String(orderId));
-    const payment = await db.getPayment(orderId);
-
-    if (!order && !payment) {
-      return res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'Transaksi tidak ditemukan.' });
-    }
-
-    const currentStatus = (order && order.status) || (payment && payment.status) || 'PENDING';
-    return res.json({
-      success: true,
-      order_id: orderId,
-      status: currentStatus,
-      paid: ['BERHASIL', 'SUCCESS', 'PAID', 'LUNAS'].includes(String(currentStatus).toUpperCase()),
-      data: order || payment
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Balance Routes at /api/balance/* (Accepts both Mobile App token & Web token)
-app.get(['/api/balance', '/api/balance/me'], requireAuth, async (req, res) => {
-  try {
-    const user = await db.getUser(req.user.username);
-    return res.json({
-      success: true,
-      data: {
-        balance: user.mainBalance !== undefined ? user.mainBalance : (user.saldo || 0),
-        qris_balance: user.qrisBalance || 0
-      }
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/balance/topup', requireAuth, async (req, res) => {
-  try {
-    const { amount } = req.body;
-    const numAmt = Math.ceil(Number(amount) || 0);
-    if (!numAmt || numAmt < 1000) {
-      return res.status(400).json({ success: false, error: 'Nominal top-up minimal Rp 1.000.' });
-    }
-
-    const user = req.user;
-    const qrisRes = await fincloudQrisService.createDynamicQris({
-      amount: numAmt,
-      userId: user.username,
-      username: user.username
-    });
-
-    const refId = qrisRes.invoice || `TOPUP_${user.username}_${Date.now()}`;
-    await db.addPayment({
-      id: refId,
-      idDepo: refId,
-      username: user.username,
-      amount: numAmt,
-      status: 'PENDING',
-      paymentUrl: qrisRes.qr_link,
-      qrUrl: qrisRes.qr_link
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        ref_id: refId,
-        amount: numAmt,
-        qr_link: qrisRes.qr_link,
-        payment_link: qrisRes.payment_link || qrisRes.qr_link,
-        expired_at: qrisRes.expired_at
-      }
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/balance/history', requireAuth, async (req, res) => {
-  try {
-    const user = await db.getUser(req.user.username);
-    const history = (user?.history || []).filter(h => h.type === 'TOPUP' || h.type === 'DEPOSIT' || String(h.id).startsWith('TOPUP') || String(h.id).startsWith('INV-'));
-    return res.json({
-      success: true,
-      data: history
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Admin Products & Channels API from mobile-api.md
-app.patch('/api/admin/products/products/:id/channels', requireAdminAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { channels } = req.body;
-    await db.setConfig(`product_channels_${id}`, channels || ['web', 'app']);
-    return res.json({ success: true, message: `Channel untuk produk ${id} berhasil diperbarui.`, channels });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/admin/products/sync', requireAdminAuth, async (req, res) => {
-  try {
-    // Triggers fresh sync from vendor
-    await sekalipayService.getItems(true);
-    return res.json({ success: true, message: 'Sinkronisasi produk berhasil dipicu.' });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/admin/products/sync-status', requireAdminAuth, (req, res) => {
-  return res.json({
-    success: true,
-    status: 'idle',
-    last_sync: new Date().toISOString()
-  });
-});
-
-app.get('/api/orders', requireAdminAuth, async (req, res) => {
-  try {
-    const { channel, order_type } = req.query;
-    const payments = await db.getAllPayments();
-    return res.json({
-      success: true,
-      channel: channel || 'all',
-      order_type: order_type || 'all',
-      orders: payments
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ==========================================
 // ==========================================
 // GITHUB AUTO-DEPLOY WEBHOOK (FINCLOUD AUTO-RESTART)
 // ==========================================
@@ -1115,6 +973,146 @@ app.post('/admin/change-credentials', requireAdminAuth, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// MOBILE APP EXTENSIONS & BALANCES (TOKEN COMPATIBILITY)
+// ==========================================
+app.get('/api/payments/status/:orderId', requireAuth, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const username = req.user.username;
+    const user = await db.getUser(username);
+    const order = (user?.history || []).find(h => String(h.id) === String(orderId) || String(h.orderId) === String(orderId));
+    const payment = await db.getPayment(orderId);
+
+    if (!order && !payment) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'Transaksi tidak ditemukan.' });
+    }
+
+    const currentStatus = (order && order.status) || (payment && payment.status) || 'PENDING';
+    return res.json({
+      success: true,
+      order_id: orderId,
+      status: currentStatus,
+      paid: ['BERHASIL', 'SUCCESS', 'PAID', 'LUNAS'].includes(String(currentStatus).toUpperCase()),
+      data: order || payment
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get(['/api/balance', '/api/balance/me'], requireAuth, async (req, res) => {
+  try {
+    const user = await db.getUser(req.user.username);
+    return res.json({
+      success: true,
+      data: {
+        balance: user.mainBalance !== undefined ? user.mainBalance : (user.saldo || 0),
+        qris_balance: user.qrisBalance || 0
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/balance/topup', requireAuth, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const numAmt = Math.ceil(Number(amount) || 0);
+    if (!numAmt || numAmt < 1000) {
+      return res.status(400).json({ success: false, error: 'Nominal top-up minimal Rp 1.000.' });
+    }
+
+    const user = req.user;
+    const qrisRes = await fincloudQrisService.createDynamicQris({
+      amount: numAmt,
+      userId: user.username,
+      username: user.username
+    });
+
+    const refId = qrisRes.invoice || `TOPUP_${user.username}_${Date.now()}`;
+    await db.addPayment({
+      id: refId,
+      idDepo: refId,
+      username: user.username,
+      amount: numAmt,
+      status: 'PENDING',
+      paymentUrl: qrisRes.qr_link,
+      qrUrl: qrisRes.qr_link
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        ref_id: refId,
+        amount: numAmt,
+        qr_link: qrisRes.qr_link,
+        payment_link: qrisRes.payment_link || qrisRes.qr_link,
+        expired_at: qrisRes.expired_at
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/balance/history', requireAuth, async (req, res) => {
+  try {
+    const user = await db.getUser(req.user.username);
+    const history = (user?.history || []).filter(h => h.type === 'TOPUP' || h.type === 'DEPOSIT' || String(h.id).startsWith('TOPUP') || String(h.id).startsWith('INV-'));
+    return res.json({
+      success: true,
+      data: history
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/admin/products/products/:id/channels', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { channels } = req.body;
+    await db.setConfig(`product_channels_${id}`, channels || ['web', 'app']);
+    return res.json({ success: true, message: `Channel untuk produk ${id} berhasil diperbarui.`, channels });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/products/sync', requireAdminAuth, async (req, res) => {
+  try {
+    await sekalipayService.getItems(true);
+    return res.json({ success: true, message: 'Sinkronisasi produk berhasil dipicu.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/admin/products/sync-status', requireAdminAuth, (req, res) => {
+  return res.json({
+    success: true,
+    status: 'idle',
+    last_sync: new Date().toISOString()
+  });
+});
+
+app.get('/api/orders', requireAdminAuth, async (req, res) => {
+  try {
+    const { channel, order_type } = req.query;
+    const payments = await db.getAllPayments();
+    return res.json({
+      success: true,
+      channel: channel || 'all',
+      order_type: order_type || 'all',
+      orders: payments
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
